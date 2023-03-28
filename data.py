@@ -6,6 +6,7 @@ import os
 from multiprocessing import Pool, cpu_count
 
 # third party
+import click
 import cv2
 import numpy as np
 import pydicom
@@ -293,8 +294,9 @@ def build_preprocessed_image(
     save_file_name = os.path.join(save_directory, save_file_name)
     cv2.imwrite(save_file_name, image)
 
-
-def preprocess_images_task(image_directory="./image_data/preprocessed_data_240x384"):
+@click.command()
+@click.option('--image_directory', default="./image_data/preprocessed_data_240x384")
+def preprocess_images_task(image_directory):
     """
     Function that will preprocess all of the images for the breast
     cancer detection
