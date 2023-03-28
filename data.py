@@ -294,9 +294,12 @@ def build_preprocessed_image(
     save_file_name = os.path.join(save_directory, save_file_name)
     cv2.imwrite(save_file_name, image)
 
+
 @click.command()
-@click.option('--image_directory', default="./image_data/preprocessed_data_240x384")
-def preprocess_images_task(image_directory):
+@click.option("--image_directory", default="./image_data/preprocessed_data_240x384")
+@click.option("--width", default=240)
+@click.option("--height", default=384)
+def preprocess_images_task(image_directory, width, height):
     """
     Function that will preprocess all of the images for the breast
     cancer detection
@@ -307,9 +310,11 @@ def preprocess_images_task(image_directory):
     )
 
     # Set up function to run in multiprocessing
+    output_size = (width, height)
     image_preprocessing = functools.partial(
         build_preprocessed_image,
         save_directory=f"./image_data/{image_directory}",
+        output_size=output_size,
     )
 
     # Will run very quick with many cores and a lot of memory
