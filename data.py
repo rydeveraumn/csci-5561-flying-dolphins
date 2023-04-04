@@ -9,6 +9,7 @@ from multiprocessing import Pool, cpu_count
 import click
 import cv2
 import numpy as np
+import pandas as pd
 import pydicom
 import tqdm
 from cv2_rolling_ball import subtract_background_rolling_ball
@@ -18,6 +19,7 @@ from skimage.draw import polygon
 from skimage.feature import canny
 from skimage.filters import sobel
 from skimage.transform import hough_line, hough_line_peaks
+from torch.utils.data import Dataset
 
 
 # This function performs the rolling ball algorithm on an image given the image and ball size
@@ -252,6 +254,7 @@ def crop_medical_image(image, output_size, threshold=20):
 def build_preprocessed_image(
     filename,
     save_directory,
+    train_df,
     process_type="full_preprocess",
     output_size=(240, 384),
     read_dicom=True,
@@ -264,7 +267,7 @@ def build_preprocessed_image(
     if read_dicom:
         dicom = pydicom.dcmread(filename)
         image = apply_voi_lut(dicom.pixel_array, dicom)
-        image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+        image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_16UC1)
 
         if dicom.PhotometricInterpretation == "MONOCHROME1":
             image = 255 - image
@@ -277,7 +280,7 @@ def build_preprocessed_image(
 
     if process_type == "full_preprocess":
         # Crop the image around the breast and resize
-        image = crop_medical_image(image, output_size=output_size, threshold=45)
+        image = crop_medical_image(image, output_size=output_size, threshold=20)
 
         # Remove the background
         image = removeBackground(
@@ -293,12 +296,20 @@ def build_preprocessed_image(
         # consistency that we mentioned
         image = right_orient_mammogram(image)
 
-        # Remove the pectoral muscle
-        try:
-            image = removePectoral(image.copy())
+        # Get patient information
+        patient_id, image_id = filename.split(".")[0].split("/")[-2:]
+        patient_id, image_id = int(patient_id), int(image_id)
+        patient_row_condition = (train_df["patient_id"] == patient_id) & (
+            train_df["image_id"] == image_id
+        )
+        view_type = train_df.loc[patient_row_condition]["view"].values[0]
+        if view_type == "CC":
+            # Remove the pectoral muscle
+            try:
+                image = removePectoral(image.copy())
 
-        except IndexError:
-            pass
+            except Exception as e:
+                pass
 
         # Write the processed image to a new directory
         cv2.imwrite(save_file_name, image)
@@ -311,6 +322,45 @@ def build_preprocessed_image(
     elif process_type == "resize_only":
         image = cv2.resize(image, output_size, cv2.INTER_LANCZOS4)
         cv2.imwrite(save_file_name, image)
+
+
+# create RSNA torch dataset
+class RSNABreastDataset(Dataset):
+    """
+    Class for loading in the breast cancer dataset
+    """
+
+    def __init__(self, df, image_dir, transforms=None):
+        # Set the image path
+        self.image_paths = df["path"].values
+        self.image_dir = image_dir
+
+        # Set whether we should apply augmentations / transformations
+        self.transforms = transforms
+
+        # Set up the training labels
+        self.labels = df["cancer"].values
+
+    def __len__(self):
+        # Essentially tells us how many images are in the
+        # dataset
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        # Get the images - can read in multiple images
+        # at ones with cv2
+        image = cv2.imread(os.path.join(self.image_dir, self.image_paths[idx]))
+
+        if self.transforms:
+            image = self.transforms(image)  # ['image']
+
+        labels = torch.tensor([self.labels[idx]], dtype=torch.float)
+
+        # This is not specified in the code but this is probably for
+        # weighting the class imbalance
+        w = torch.tensor([1])
+
+        return image, labels, w
 
 
 @click.command()
@@ -326,7 +376,11 @@ def preprocess_images_task(image_directory, width, height, process_type):
     # Get all of the files
     files = glob.glob(
         "/home/rydevera3/data-science/kaggle/rsna-breast-cancer/data/train_images/*/*"
-    )[:10]
+    )
+
+    # Load in the training data
+    train_df = pd.read_csv("./data/train.csv")
+    train_df = train_df[["patient_id", "image_id", "view"]]
 
     # Set up function to run in multiprocessing
     output_size = (width, height)
@@ -335,6 +389,7 @@ def preprocess_images_task(image_directory, width, height, process_type):
         save_directory=f"./image_data/{image_directory}",
         output_size=output_size,
         process_type=process_type,
+        train_df=train_df,
     )
 
     # Will run very quick with many cores and a lot of memory
