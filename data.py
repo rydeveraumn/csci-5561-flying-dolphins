@@ -250,7 +250,11 @@ def crop_medical_image(image, output_size, threshold=20):
 
 
 def build_preprocessed_image(
-    filename, save_directory, output_size=(240, 384), read_dicom=True
+    filename,
+    save_directory,
+    process_type="full_preprocess",
+    output_size=(240, 384),
+    read_dicom=True,
 ):
     """
     Function that will take a file name as an input and output
@@ -260,46 +264,61 @@ def build_preprocessed_image(
     if read_dicom:
         dicom = pydicom.dcmread(filename)
         image = apply_voi_lut(dicom.pixel_array, dicom)
-        image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_16UC1)
+        image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+        if dicom.PhotometricInterpretation == "MONOCHROME1":
+            image = 255 - image
 
     else:
         image = cv2.imread(filename)
 
-    # Crop the image around the breast and resize
-    image = crop_medical_image(image, output_size=output_size, threshold=45)
-
-    # Remove the background
-    image = removeBackground(
-        image,
-        ball_size=5,
-        erosion_size=(4, 2),
-        erosion_iterations=1,
-        dilation_size=(3, 2),
-        dilation_iterations=6,
-    )
-
-    # I think we should right orient the image just for the
-    # consistency that we mentioned
-    image = right_orient_mammogram(image)
-
-    # Remove the pectoral muscle
-    try:
-        image = removePectoral(image.copy())
-
-    except IndexError:
-        pass
-
-    # Write the processed image to a new directory
     save_file_name = "_".join(filename.split("/")[-2:]).replace(".dcm", ".png")
     save_file_name = os.path.join(save_directory, save_file_name)
-    cv2.imwrite(save_file_name, image)
+
+    if process_type == "full_preprocess":
+        # Crop the image around the breast and resize
+        image = crop_medical_image(image, output_size=output_size, threshold=45)
+
+        # Remove the background
+        image = removeBackground(
+            image,
+            ball_size=5,
+            erosion_size=(4, 2),
+            erosion_iterations=1,
+            dilation_size=(3, 2),
+            dilation_iterations=6,
+        )
+
+        # I think we should right orient the image just for the
+        # consistency that we mentioned
+        image = right_orient_mammogram(image)
+
+        # Remove the pectoral muscle
+        try:
+            image = removePectoral(image.copy())
+
+        except IndexError:
+            pass
+
+        # Write the processed image to a new directory
+        cv2.imwrite(save_file_name, image)
+
+    elif process_type == "crop_only":
+        # Crop the image around the breast and resize
+        image = crop_medical_image(image, output_size=output_size, threshold=45)
+        cv2.imwrite(save_file_name, image)
+
+    elif process_type == "resize_only":
+        image = cv2.resize(image, output_size, cv2.INTER_LANCZOS4)
+        cv2.imwrite(save_file_name, image)
 
 
 @click.command()
 @click.option("--image_directory", default="./image_data/preprocessed_data_240x384")
 @click.option("--width", default=240)
 @click.option("--height", default=384)
-def preprocess_images_task(image_directory, width, height):
+@click.option("--process_type", default="full_preprocess")
+def preprocess_images_task(image_directory, width, height, process_type):
     """
     Function that will preprocess all of the images for the breast
     cancer detection
@@ -307,7 +326,7 @@ def preprocess_images_task(image_directory, width, height):
     # Get all of the files
     files = glob.glob(
         "/home/rydevera3/data-science/kaggle/rsna-breast-cancer/data/train_images/*/*"
-    )
+    )[:10]
 
     # Set up function to run in multiprocessing
     output_size = (width, height)
@@ -315,6 +334,7 @@ def preprocess_images_task(image_directory, width, height):
         build_preprocessed_image,
         save_directory=f"./image_data/{image_directory}",
         output_size=output_size,
+        process_type=process_type,
     )
 
     # Will run very quick with many cores and a lot of memory
