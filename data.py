@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import pydicom
+import torch
 import tqdm
 from cv2_rolling_ball import subtract_background_rolling_ball
 from pydicom.pixel_data_handlers.util import apply_voi_lut
@@ -232,7 +233,7 @@ def crop_medical_image(image, output_size, threshold=20):
     # Regions of non-empty pixels
     # Current experiemnts show that  is a good cutoff
     output = cv2.connectedComponentsWithStats(
-        (X > threshold).astype(np.uint8), 8, cv2.CV_32S
+        (X > threshold).astype(np.uint8), 8, cv2.CV_32F
     )
 
     # Get the stats
@@ -267,7 +268,7 @@ def build_preprocessed_image(
     if read_dicom:
         dicom = pydicom.dcmread(filename)
         image = apply_voi_lut(dicom.pixel_array, dicom)
-        image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_16UC1)
+        image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
         if dicom.PhotometricInterpretation == "MONOCHROME1":
             image = 255 - image
@@ -284,7 +285,7 @@ def build_preprocessed_image(
 
         # Remove the background
         image = removeBackground(
-            image,
+            image.astype(int),
             ball_size=5,
             erosion_size=(4, 2),
             erosion_iterations=1,
@@ -303,7 +304,7 @@ def build_preprocessed_image(
             train_df["image_id"] == image_id
         )
         view_type = train_df.loc[patient_row_condition]["view"].values[0]
-        if view_type == "CC":
+        if view_type == "MLO":
             # Remove the pectoral muscle
             try:
                 image = removePectoral(image.copy())
@@ -316,11 +317,13 @@ def build_preprocessed_image(
 
     elif process_type == "crop_only":
         # Crop the image around the breast and resize
-        image = crop_medical_image(image, output_size=output_size, threshold=45)
+        image = crop_medical_image(image, output_size=output_size, threshold=20)
+        images = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
         cv2.imwrite(save_file_name, image)
 
     elif process_type == "resize_only":
-        image = cv2.resize(image, output_size, cv2.INTER_LANCZOS4)
+        image = cv2.resize(image, output_size, cv2.INTER_AREA)
+        image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
         cv2.imwrite(save_file_name, image)
 
 

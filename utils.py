@@ -1,4 +1,7 @@
+# third party
+import numpy as np
 import torch
+import tqdm
 
 
 # Train one epoch
@@ -14,7 +17,7 @@ def train_one_epoch(model, data_loader, epoch, criterion, optimizer, scaler, dev
     all_labels = []
     train_loss = 0
 
-    for index, (images, labels, weights) in tqdm(enumerate(data_loader)):
+    for index, (images, labels, weights) in tqdm.tqdm(enumerate(data_loader)):
         # Make sure the images are compatible with the model
         # and located on the right device
         images = images.to(device=device)
@@ -80,7 +83,7 @@ def build_predictions(model, data_loader, device):
     # TODO: will have to do something if the labels are empty
     # I think this will be present in the data loader
     with torch.no_grad():
-        for index, (images, labels, weights) in tqdm(enumerate(data_loader)):
+        for index, (images, labels, weights) in tqdm.tqdm(enumerate(data_loader)):
             images = images.to(device=device)
 
             # Get the predictions
