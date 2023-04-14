@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import tqdm
+from sklearn import metrics
 
 
 # Train one epoch
@@ -60,15 +61,11 @@ def evaluate_model(model, data_loader, metric, device):
     Function to evaluate the model. The metrics can be a dictionary
     that will run multiple metrics for the model
     """
-    model.eval()
+    predictions, labels = build_predictions(model, data_loader, device)
 
-    # Make sure we turn off the ability to change / update gradients
-    with torch.no_grad():
-        predictions, labels = build_predictions(model, data_loader, device)
-
-        # Assume sklearn metrics
-        metric_value = metric(labels, predictions)
-        print(f"Evaluation metric = {metric_value}")
+    # Assume sklearn metrics
+    metric_value = metric(labels, predictions)
+    print(f"Evaluation metric = {metric_value}")
 
 
 def build_predictions(model, data_loader, device):
@@ -98,3 +95,71 @@ def build_predictions(model, data_loader, device):
             all_labels.append(labels.detach().cpu().numpy())
 
     return np.concatenate(all_predictions), np.concatenate(all_labels)
+
+
+def build_patient_lateral_predictions_and_evaluate(y_pred, data):
+    """
+    Function that takes in a dataframe with patient information
+    and the output will be the predictions for a patients L & R
+    breast
+    """
+    # Get the predictions
+    data["predictions"] = y_pred
+
+    # Get predictions df
+    predictions_df = (
+        data.groupby(["patient_id", "laterality"])[["cancer", "predictions"]]
+        .mean()
+        .reset_index(drop=True)
+    )
+
+    # Get the different metrics
+    y_true = predictions_df["cancer"].values
+    y_pred = predictions_df["predictions"].values
+
+    model_metrics = {}
+    # Log loss
+    model_metrics["logloss"] = metrics.log_loss(y_true, y_pred)
+
+    # AUCROC score
+    model_metrics["roc_auc_score"] = metrics.roc_auc_score(y_true, y_pred)
+
+    # Macro F1 score
+    f1_scores = []
+    for i in np.arange(0.05, 0.50, 0.01):
+        binary_predictions = (y_pred > i).astype(int)
+        f1_score = pfbeta(y_true, binary_predictions, beta=1)
+        f1_scores.append((f1_score, i))
+
+    f1_scores = sorted(f1_scores)
+    f1_score = f1_scores[0]
+    model_metrics["f1_score"] = f1_score
+
+    return model_metrics
+
+
+def pfbeta(labels, predictions, beta):
+    y_true_count = 0
+    ctp = 0
+    cfp = 0
+
+    for idx in range(len(labels)):
+        prediction = min(max(predictions[idx], 0), 1)
+        if labels[idx]:
+            y_true_count += 1
+            ctp += prediction
+        else:
+            cfp += prediction
+
+    beta_squared = beta * beta
+    c_precision = ctp / (ctp + cfp)
+    c_recall = ctp / y_true_count
+    if c_precision > 0 and c_recall > 0:
+        result = (
+            (1 + beta_squared)
+            * (c_precision * c_recall)
+            / (beta_squared * c_precision + c_recall)
+        )
+        return result
+    else:
+        return 0

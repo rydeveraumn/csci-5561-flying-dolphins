@@ -9,10 +9,10 @@ class RSNAEfficientnetModel(nn.Module):
 
         # Setup the model
         self.model = timm.create_model(
-            "efficientnet_b1",
+            "tf_efficientnetv2_s",
             pretrained=True,
-            drop_rate=0.3,
-            drop_path_rate=0.2,
+            drop_rate=0.6,
+            drop_path_rate=0.3,
             global_pool="avg",
             num_classes=1,
         )
@@ -23,10 +23,10 @@ class RSNAEfficientnetModel(nn.Module):
         self.model.conv_stem.stride = (1, 1)
 
         classifier = nn.Sequential(
-            nn.Linear(self.model.classifier.in_features, 512, bias=True),
-            nn.ReLU(),
-            nn.Dropout(p=0.10),
-            nn.Linear(512, 256, bias=True),
+            nn.Linear(self.model.classifier.in_features, 256, bias=True),
+            # nn.ReLU(),
+            # nn.Dropout(p=0.10),
+            # nn.Linear(512, 256, bias=True),
             nn.ReLU(),
             nn.Dropout(p=0.10),
             nn.Linear(256, 1, bias=True),
